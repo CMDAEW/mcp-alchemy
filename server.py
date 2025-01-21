@@ -1,119 +1,110 @@
-import os, json, hashlib
-from typing import Optional
-from datetime import datetime, date
-from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import create_engine, inspect, text
-import logging
-import asyncio
-
-# Load environment variables
-load_dotenv()
-
-# Logging konfigurieren
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("mcp_alchemy")
-
-### Database ###
+from typing import Optional
+from datetime import datetime, date
+import os
 
 def get_engine():
-    connection_string = (
-        "mssql+pymssql://"
-        "heidi_user:Arschloch1985!@127.0.0.1:1433/"
-        "Ikarus_LVDB_Test"
-        "?charset=utf8&appname=MSOLEDBSQL"
-    )
-    return create_engine(connection_string)
+    return create_engine("mssql+pymssql://heidi_user:Arschloch1985!@127.0.0.1:1433/Ikarus_LVDB_Test")
 
-def get_db_info():
+mcp = FastMCP("MCP Alchemy")
+
+@mcp.tool("all_table_names")
+async def all_table_names() -> str:
+    """Return all table names in the database separated by comma."""
     engine = get_engine()
-    with engine.connect() as conn:
-        url = engine.url
-        return (f"Connected to {engine.dialect.name} "
-                f"database '{url.database}' on {url.host} "
-                f"as user '{url.username}'")
+    inspector = inspect(engine)
+    return ", ".join(inspector.get_table_names())
 
-### Constants ###
-DB_INFO = get_db_info()
-EXECUTE_QUERY_MAX_CHARS = int(os.environ.get('EXECUTE_QUERY_MAX_CHARS', 4000))
-CLAUDE_FILES_PATH = os.environ.get('CLAUDE_LOCAL_FILES_PATH')
+@mcp.tool("filter_table_names")
+async def filter_table_names(q: str) -> str:
+    """Find tables matching a substring."""
+    engine = get_engine()
+    inspector = inspect(engine)
+    return ", ".join(x for x in inspector.get_table_names() if q in x)
 
-### MCP ###
-def create_mcp():
-    mcp = FastMCP("MCP Alchemy")
+@mcp.tool("schema_definitions")
+async def schema_definitions(table_names: list[str]) -> str:
+    """Get detailed schema for specified tables."""
+    engine = get_engine()
+    inspector = inspect(engine)
     
-    @mcp.tool("List all tables in the database")
-    async def all_table_names() -> str:
-        try:
-            engine = get_engine()
-            inspector = inspect(engine)
-            tables = inspector.get_table_names()
-            logger.info(f"Found {len(tables)} tables")
-            return ", ".join(tables)
-        except Exception as e:
-            logger.error(f"Error listing tables: {e}")
-            return f"Error: {str(e)}"
+    def format_table(table_name: str) -> str:
+        columns = inspector.get_columns(table_name)
+        foreign_keys = inspector.get_foreign_keys(table_name)
+        primary_keys = set(inspector.get_pk_constraint(table_name)["constrained_columns"])
+        
+        result = [f"{table_name}:"]
+        
+        # Columns
+        for column in columns:
+            attrs = []
+            if column["name"] in primary_keys:
+                attrs.append("primary key")
+            if column.get("autoincrement"):
+                attrs.append("autoincrement")
+            if column["nullable"]:
+                attrs.append("nullable")
+            
+            result.append(f"    {column['name']}: {column['type']}" + 
+                         (f", {', '.join(attrs)}" if attrs else ""))
+        
+        # Relationships
+        if foreign_keys:
+            result.extend(["", "    Relationships:"])
+            for fk in foreign_keys:
+                result.append(f"      {', '.join(fk['constrained_columns'])} -> "
+                            f"{fk['referred_table']}.{', '.join(fk['referred_columns'])}")
+        
+        return "\n".join(result)
     
-    @mcp.tool("Filter tables by name")
-    async def filter_table_names(q: str) -> str:
-        try:
-            engine = get_engine()
-            inspector = inspect(engine)
-            tables = [x for x in inspector.get_table_names() if q in x]
-            logger.info(f"Found {len(tables)} tables matching '{q}'")
-            return ", ".join(tables)
-        except Exception as e:
-            logger.error(f"Error filtering tables: {e}")
-            return f"Error: {str(e)}"
+    return "\n\n".join(format_table(table) for table in table_names)
 
-    @mcp.tool("Get schema information")
-    async def schema_definitions(table_names: list[str]) -> str:
-        try:
-            engine = get_engine()
-            inspector = inspect(engine)
-            result = []
-            for table_name in table_names:
-                columns = inspector.get_columns(table_name)
-                result.append(f"{table_name}:")
-                for col in columns:
-                    result.append(f"  {col['name']}: {col['type']}")
-            return "\n".join(result)
-        except Exception as e:
-            logger.error(f"Error getting schema: {e}")
-            return f"Error: {str(e)}"
+# ... vorheriger Code bleibt gleich ...
 
-    def execute_query_description():
-        parts = [
-            f"Execute a SQL query and return results in a readable format. Results will be truncated after {EXECUTE_QUERY_MAX_CHARS} characters."
-        ]
-        if CLAUDE_FILES_PATH:
-            parts.append("Claude Desktop may fetch the full result set via an url for analysis and artifacts.")
-        parts.append(DB_INFO)
-        return " ".join(parts)
+@mcp.tool("execute_query")
+async def execute_query(query: str | dict, params: Optional[dict] = None) -> str:
+    """Execute SQL query with vertical output format."""
+    def format_value(val):
+        if val is None:
+            return "NULL"
+        if isinstance(val, (datetime, date)):
+            return val.isoformat()
+        return str(val)
 
-    @mcp.tool("Execute SQL query")
-    async def execute_query(query: str) -> str:
-        try:
-            engine = get_engine()
-            with engine.connect() as conn:
-                result = conn.execute(text(query))
-                if not result.returns_rows:
-                    return f"Success: {result.rowcount} rows affected"
-                return "\n".join(str(row) for row in result)
-        except Exception as e:
-            logger.error(f"Error executing query: {e}")
-            return f"Error: {str(e)}"
+    try:
+        # Handle dict input
+        if isinstance(query, dict):
+            query = query.get('query', '')
+        
+        engine = get_engine()
+        with engine.connect() as conn:
+            result = conn.execute(text(query), params or {})
+            
+            if not result.returns_rows:
+                return f"Success: {result.rowcount} rows affected"
+            
+            columns = result.keys()
+            rows = result.fetchall()
+            
+            if not rows:
+                return "No rows returned"
+            
+            # Format in vertical style
+            output = []
+            for i, row in enumerate(rows, 1):
+                output.append(f"{i}. row")
+                for col, val in zip(columns, row):
+                    output.append(f"{col}: {format_value(val)}")
+                output.append("")
+            
+            output.append(f"Result: {len(rows)} rows")
+            return "\n".join(output)
+            
+    except Exception as e:
+        return f"Error: {str(e)}"
 
-    return mcp
+# ... Rest des Codes bleibt gleich ...
 
 if __name__ == "__main__":
-    try:
-        logger.info("Starting MCP server...")
-        mcp = create_mcp()
-        mcp.run()
-    except Exception as e:
-        logger.error(f"Server error: {e}")
-        raise
+    mcp.run()
