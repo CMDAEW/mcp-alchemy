@@ -1,16 +1,34 @@
 import os, json, hashlib
 from typing import Optional
 from datetime import datetime, date
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import create_engine, inspect, text
+
+print("Starting server...")
+
+# Load environment variables
+load_dotenv()
 
 ### Database ###
 
 def get_engine(readonly=True):
-    connection_string = os.environ['DB_URL']
-    return create_engine(connection_string, isolation_level='AUTOCOMMIT', execution_options={'readonly': readonly})
+    print("Creating engine...")
+    connection_string = (
+        "mssql+pymssql://"
+        "heidi_user:Arschloch1985!@127.0.0.1:1433/"
+        "Ikarus_LVDB_Test"
+        "?charset=utf8&appname=MSOLEDBSQL"
+    )
+    print(f"Using connection string: {connection_string}")
+    return create_engine(
+        connection_string,
+        isolation_level='AUTOCOMMIT',
+        execution_options={'readonly': readonly}
+    )
 
 def get_db_info():
+    print("Getting DB info...")
     engine = get_engine(readonly=True)
     with engine.connect() as conn:
         url = engine.url
@@ -20,8 +38,9 @@ def get_db_info():
                 f"as user '{url.username}'")
 
 ### Constants ###
-
+print("Setting up constants...")
 DB_INFO = get_db_info()
+print(f"DB_INFO: {DB_INFO}")
 EXECUTE_QUERY_MAX_CHARS = int(os.environ.get('EXECUTE_QUERY_MAX_CHARS', 4000))
 CLAUDE_FILES_PATH = os.environ.get('CLAUDE_LOCAL_FILES_PATH')
 
@@ -35,9 +54,7 @@ def all_table_names() -> str:
     inspector = inspect(engine)
     return ", ".join(inspector.get_table_names())
 
-@mcp.tool(
-    description=f"Return all table names in the database containing the substring 'q' separated by comma. {DB_INFO}"
-)
+@mcp.tool(description=f"Return all table names in the database containing the substring 'q' separated by comma. {DB_INFO}")
 def filter_table_names(q: str) -> str:
     engine = get_engine()
     inspector = inspect(engine)
@@ -160,4 +177,5 @@ def execute_query(query: str, params: Optional[dict] = None) -> str:
         return f"Error: {str(e)}"
 
 if __name__ == "__main__":
+    print("Starting MCP server...")
     mcp.run()

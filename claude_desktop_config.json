@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "mssql_db": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "C:\\Users\\cmued\\claude\\mcp-alchemy",
+        "run",
+        "server.py"
+      ],
+      "env": {
+        "DB_URL": "mssql+pymssql://heidi_user:Arschloch1985!@127.0.0.1:1433/Ikarus_LVDB_Test?charset=utf8&appname=MSOLEDBSQL",
+        "CLAUDE_LOCAL_FILES_PATH": "C:\\Users\\cmued\\claude\\claude-local-files\\files"
+      }
+    }
+  }
+}
