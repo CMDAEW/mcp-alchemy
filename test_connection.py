@@ -1,22 +1,14 @@
-import pymssql
+import pymysql
 
 try:
-    # Exakte HeidiSQL Einstellungen
-    conn = pymssql.connect(
-        server='127.0.0.1',        # Hostname/IP wie in HeidiSQL
+    conn = pymysql.connect(
+        host='localhost',
         user='heidi_user',
         password='Arschloch1985!',
         database='Ikarus_LVDB_Test',
-        port=1433,                 # Port explizit angeben
-        appname='MSOLEDBSQL'       # Bibliothek wie in HeidiSQL
+        port=1433
     )
-    
-    print("Verbindung erfolgreich!")
-    cursor = conn.cursor()
-    cursor.execute('SELECT @@VERSION')
-    row = cursor.fetchone()
-    print("SQL Server Version:", row[0])
+    print("MySQL Verbindung erfolgreich!")
     conn.close()
-
 except Exception as e:
-    print(f"Fehler: {str(e)}")
+    print(f"Fehler: {e}")
